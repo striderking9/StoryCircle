@@ -1,55 +1,91 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
-import Image from "@tiptap/extension-image";
-import Link from "@tiptap/extension-link";
+import HardBreak from "@tiptap/extension-hard-break";
+import Placeholder from "@tiptap/extension-placeholder";
 import Underline from "@tiptap/extension-underline";
-import { useState } from "react";
+import LinkExtension from "@tiptap/extension-link";
+import Image from "@tiptap/extension-image";
 
 export default function CreateArticlePage() {
+  const router = useRouter();
+
+  // helper File → Base64
+  const toBase64 = (file: File): Promise<string> =>
+    new Promise((res, rej) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => res(reader.result as string);
+      reader.onerror = (e) => rej(e);
+    });
+
+  // 📚 l’éditeur
   const editor = useEditor({
     extensions: [
-      StarterKit,
-      Underline,
-      Link.configure({
+      StarterKit,                 // paragraphe, titres, listes, etc.
+      HardBreak,                  // support des retours à la ligne
+      Placeholder.configure({     // placeholder intégré
+        placeholder: "Commencez à rédiger votre article ici…",
+      }),
+      Underline,                  // <u>
+      LinkExtension.configure({   // gestion des liens
         autolink: false,
         linkOnPaste: false,
       }),
-      Image,
+      Image,                      // insertion inline d’images
     ],
-    content: `<p>Commencez à rédiger votre article ici...</p>`,
+    content: "",                  // on démarre vide
+    editorProps: {
+      attributes: {
+        class:
+          "ProseMirror p-4 prose prose-sm sm:prose lg:prose-lg xl:prose-xl dark:prose-invert focus:outline-none",
+      },
+    },
   });
 
+  // états du form
   const [title, setTitle] = useState("");
   const [videoUrl, setVideoUrl] = useState("");
-  const [uploadError, setUploadError] = useState("");
-  const [savedContent, setSavedContent] = useState(""); // optionnel: pour sauvegarder temporairement le contenu
+  const [coverImage, setCoverImage] = useState<File | null>(null);
+  const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Fonction pour insérer une image dans l'éditeur
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // cover image
+  const onCoverChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
+    if (file) setCoverImage(file);
+  };
 
+  // inline image
+  const onImageInline = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !editor) return;
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = () => {
-      const base64 = reader.result as string;
-      // Insertion de l'image au curseur actuel
-      editor?.chain().focus().setImage({ src: base64 }).run();
+      editor.chain().focus().setImage({ src: reader.result as string }).run();
     };
-    reader.onerror = (error) => {
-      console.error("Erreur lors de l'upload de l'image :", error);
-      setUploadError("Erreur lors de l'upload de l'image.");
-    };
+    reader.onerror = () => setError("Impossible d’insérer l’image inline.");
   };
 
-  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+  // submit
+  const onSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!editor) return;
     setIsSubmitting(true);
-    const contentHtml = editor?.getHTML() || "";
+    setError("");
+
     try {
+      const contentHtml = editor.getHTML();
+
+      let coverBase64: string | null = null;
+      if (coverImage) {
+        coverBase64 = await toBase64(coverImage);
+      }
+
       const res = await fetch("/api/posts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -57,118 +93,136 @@ export default function CreateArticlePage() {
         body: JSON.stringify({
           title,
           content: contentHtml,
-          videoUrl,
+          imageUrl: coverBase64,
+          videoUrl: videoUrl || null,
         }),
       });
-      if (res.ok) {
-        // Redirection vers l'accueil après publication
-        window.location.href = "/";
-      } else {
-        console.error("Erreur lors de la création de l'article");
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => null);
+        throw new Error(payload?.error || "Publication échouée");
       }
-    } catch (err) {
+
+      router.push("/");
+    } catch (err: any) {
       console.error(err);
-    } finally {
+      setError(err.message || "Erreur pendant la publication");
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-8">
-      <h1 className="text-3xl font-bold text-center text-gray-800 dark:text-white mb-6">
-        Créer un article
-      </h1>
-      <form onSubmit={handleSubmit} className="space-y-6">
+    <div className="max-w-3xl mx-auto px-4 py-8 space-y-6">
+      <h1 className="text-4xl font-extrabold text-center">Créer un article</h1>
+
+      <form onSubmit={onSubmit} className="space-y-6">
+        {/* TITRE */}
         <input
           type="text"
           placeholder="Titre"
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           required
-          className="w-full p-4 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          className="w-full p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
         />
-        {/* Barre d'outils personnalisée */}
-        <div className="flex flex-wrap gap-2 mb-2">
+
+        {/* IMAGE DE COUVERTURE */}
+        <div>
+          <label className="block mb-1 font-medium">Image de couverture :</label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={onCoverChange}
+            className="text-gray-700 dark:text-gray-300"
+          />
+        </div>
+
+        {/* BARRE D’OUTILS */}
+        <div className="flex flex-wrap gap-2">
           <button
             type="button"
-            onClick={() => editor?.chain().focus().toggleBold().run()}
-            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            onClick={() => editor.chain().focus().toggleBold().run()}
+            className="px-2 py-1 bg-gray-200 dark:bg-gray-800 rounded"
           >
-            Bold
+            B
           </button>
           <button
             type="button"
-            onClick={() => editor?.chain().focus().toggleItalic().run()}
-            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            onClick={() => editor.chain().focus().toggleItalic().run()}
+            className="px-2 py-1 bg-gray-200 dark:bg-gray-800 rounded"
           >
-            Italic
+            I
           </button>
           <button
             type="button"
-            onClick={() => editor?.chain().focus().toggleUnderline().run()}
-            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            onClick={() => editor.chain().focus().toggleUnderline().run()}
+            className="px-2 py-1 bg-gray-200 dark:bg-gray-800 rounded"
           >
-            Underline
+            U
           </button>
           <button
             type="button"
-            onClick={() => editor?.chain().focus().toggleBulletList().run()}
-            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            onClick={() => editor.chain().focus().toggleBulletList().run()}
+            className="px-2 py-1 bg-gray-200 dark:bg-gray-800 rounded"
           >
-            Bullet List
+            • Liste
           </button>
           <button
             type="button"
-            onClick={() => editor?.chain().focus().toggleOrderedList().run()}
-            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            onClick={() => editor.chain().focus().toggleOrderedList().run()}
+            className="px-2 py-1 bg-gray-200 dark:bg-gray-800 rounded"
           >
-            Ordered List
+            1. Liste
           </button>
           <button
             type="button"
             onClick={() => {
-              // Insertion d'un lien : prompt simple
-              const url = prompt("Entrez l'URL du lien:");
-              if (url) {
-                editor?.chain().focus().setLink({ href: url }).run();
-              }
+              const href = prompt("URL du lien :");
+              if (href) editor.chain().focus().setLink({ href }).run();
             }}
-            className="px-3 py-1 bg-blue-500 text-white rounded hover:bg-blue-600 transition-colors"
+            className="px-2 py-1 bg-gray-200 dark:bg-gray-800 rounded"
           >
-            Add Link
+            🔗
           </button>
         </div>
-        {/* Éditeur Tiptap */}
-        <div className="border border-gray-300 rounded dark:border-gray-600">
-          <EditorContent editor={editor} className="p-4 min-h-[200px] dark:bg-gray-700 dark:text-white" />
+
+        {/* ÉDITEUR RICHE */}
+        <div className="border rounded-lg">
+          <EditorContent editor={editor} />
         </div>
-        {/* Input pour l'upload d'image (permet d'ajouter des images inline) */}
-        <div className="flex flex-col space-y-2">
-          <label className="text-gray-700 dark:text-gray-300">
-            Insérer une image :
+
+        {/* IMAGE INLINE */}
+        <div>
+          <label className="block mb-1 font-medium">
+            Insérer une image dans le texte :
           </label>
           <input
             type="file"
             accept="image/*"
-            multiple={false}
-            onChange={handleImageUpload}
-            className="text-gray-600 dark:text-gray-300"
+            onChange={onImageInline}
+            className="text-gray-700 dark:text-gray-300"
           />
-          {uploadError && <p className="text-red-500">{uploadError}</p>}
         </div>
+
+        {/* VIDÉO */}
         <input
           type="text"
           placeholder="URL de la vidéo (optionnel)"
           value={videoUrl}
           onChange={(e) => setVideoUrl(e.target.value)}
-          className="w-full p-4 border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+          className="w-full p-4 border rounded-lg focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
         />
+
+        {/* ERREUR */}
+        {error && <p className="text-red-500">{error}</p>}
+
+        {/* BOUTON */}
         <button
           type="submit"
           disabled={isSubmitting}
-          className="w-full py-4 bg-blue-500 hover:bg-blue-600 text-white rounded transition-colors disabled:opacity-50"
+          className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg disabled:opacity-50"
         >
-          Publier
+          {isSubmitting ? "Publication…" : "Publier"}
         </button>
       </form>
     </div>

@@ -31,7 +31,8 @@ model Post {
   id        String   @id @default(uuid())
   title     String
   content   String
-  imageUrl  String?
+  imageUrl  String? // image dans le contenu
+  coverImage String? // <- image de profil de l’article
   videoUrl  String?
   author    User     @relation(fields: [authorId], references: [id])
   authorId  String

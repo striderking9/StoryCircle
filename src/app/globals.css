@@ -1,4 +1,17 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+@tailwind typography;
 
+/* globals.css */
+
+.editor-wrapper .ProseMirror {
+    min-height: 12rem;
+  }
+  
+  .editor-wrapper .ProseMirror p:first-child:empty::before {
+    content: attr(data-placeholder);
+    pointer-events: none;
+    color: theme("colors.gray.400");
+  }
+  

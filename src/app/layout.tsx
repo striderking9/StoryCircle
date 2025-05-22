@@ -2,7 +2,7 @@
 import "./globals.css";
 import Providers from "./providers";
 import Header from "@/components/Header";
-import Footer from "@/components/Footer"; // Si vous avez un Footer
+import Footer from "@/components/Footer";
 
 export const metadata = {
   title: "Mon Blog",
@@ -11,11 +11,12 @@ export const metadata = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="fr">
-      <body className="bg-white dark:bg-gray-900">
+    // suppressHydrationWarning permet de ne pas bloquer sur un tout petit mismatch restant
+    <html lang="fr" suppressHydrationWarning>
+      <body className="bg-white dark:bg-gray-900 transition-colors">
         <Providers>
           <Header />
-          <main>{children}</main>
+          <main className="min-h-screen">{children}</main>
           <Footer />
         </Providers>
       </body>
